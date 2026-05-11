@@ -50,6 +50,8 @@ h1 { font-size: 14px; font-weight: 500;}
 [data-id='copyBtn'] .icon-btn { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23666' viewBox='0 0 24 24'%3E%3Cpath d='M16 1H4a2 2 0 00-2 2v12h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z'/%3E%3C/svg%3E"); }
 [data-id='calcBtn'] .icon-btn { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23666' viewBox='0 0 24 24'%3E%3Cpath d='M3 17h2v2H3v-2zm4-4h2v6H7v-6zm4-6h2v12h-2V7zm4 3h2v9h-2v-9zm4-5h2v14h-2V5z'/%3E%3C/svg%3E"); }
 [data-id='minusWrdBtn'] .icon-btn { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23666' viewBox='0 0 24 24'%3E%3Cpath d='M19 13H5v-2h14v2z'/%3E%3C/svg%3E"); }
+[data-id='n-gramAnalis'] .icon-btn { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23666' viewBox='0 0 24 24'%3E%3Cpath d='M4 6h6v4H4V6zm10 0h6v4h-6V6zM9 14h6v4H9v-4zm-1-5h2v2H8V9zm6 0h2v2h-2V9zm-3 3h2v2h-2v-2z'/%3E%3C/svg%3E");}
+[data-id='lemmatization'] .icon-btn { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23666' viewBox='0 0 24 24'%3E%3Cpath d='M5 4h14v2H5V4zm0 7h9v2H5v-2zm0 7h14v2H5v-2zm11-8l3 3-3 3v-2h-4v-2h4v-2z'/%3E%3C/svg%3E"); }
 
 .setting {
     cursor: pointer; width: 14px; height: 14px; display: inline-block;
@@ -135,3 +137,63 @@ h1 { font-size: 14px; font-weight: 500;}
 .settingTrueFalse { display: flex; flex-direction: column; gap: 10px;}
 .settingTrueFalseFlex { display: flex; gap: 8px;}
 .truefalseEl { display: flex; align-items: center; gap: 5px;}
+
+
+
+
+
+
+
+
+.loader {
+    position: fixed;
+    inset: 0;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    background: rgba(249, 249, 249, 0.55);
+    backdrop-filter: blur(1px);
+
+    z-index: 999999;
+
+    opacity: 0;
+    visibility: hidden;
+
+    transition: opacity 0.18s ease, visibility 0.18s ease;
+}
+
+.loader.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* обёртка отвечает за scale */
+.loader-mini-wrap {
+    transform: scale(0.92);
+    transition: transform 0.18s ease;
+}
+
+.loader.show .loader-mini-wrap {
+    transform: scale(1);
+}
+
+/* сам спиннер только крутится */
+.loader-mini {
+    width: 22px;
+    height: 22px;
+
+    border: 2px solid #d7dbe2;
+    border-top-color: #7b818f;
+
+    border-radius: 50%;
+
+    animation: loaderSpin 0.7s linear infinite;
+}
+
+@keyframes loaderSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}

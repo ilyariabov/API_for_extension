@@ -196,7 +196,6 @@ document.addEventListener('click', async (e) => {
                 <div class="divider"></div>
                 <div class="settingTrueFalse">
                     <label class="truefalseEl"><input type="checkbox" name="lemGram" value="lemGram">lemmatization</label>
-                    <label class="truefalseEl"><input type="checkbox" name="lemGram" value="lemGramDB">remove duplicates</label>
                 </div>
                 <div class="divider"></div>
                 <div class="settingTrueFalse">
@@ -267,8 +266,18 @@ document.addEventListener('click', async (e) => {
 
 });
 
-// отправляю на сервер формат массив в массиве. нужно понять 
-// как создать на сервере, и как обращаться / работать с сервером
+async function lemmatization(text) {
+    const response = await fetch(
+        "https://api-for-extension.onrender.com/lemmatize",
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ words: text })
+        }
+    );
+    const data = await response.json();
+    return data.result
+}
 
 document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.action-btn'); if (!btn) return;
@@ -277,371 +286,398 @@ document.addEventListener('click', async (e) => {
     const action = wrap.dataset.id;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    if (action === 'n-gramAnalis') {
-        const all_gram = await storage.get('n-gram');
-        const date_gram = new Object();
-
-        if (all_gram['process_from'] === 'page') {
-            tab.url
-            const text = await getTextFromUrl(tab.url)
-            console.log(text);
-            
-            date_gram[tab.url] = generateNGrams(text, all_gram['n-gram_checked']);
-        }
-        else if (all_gram['process_from'] === 'pages_buffer') {
-            let domain = null
-            domain = await navigator.clipboard.readText(); domain = domain.split('\n');
-
-            const alltext = [];
-            if (all_gram['gram_union']) {
-                for (const el of domain) {
-                    try { 
-                        new URL(el); 
-                        const text = await getTextFromUrl(el)
-                        alltext.push(...text); 
-                    } catch (e) { }
-                }
-                date_gram['all site'] = generateNGrams(alltext, all_gram['n-gram_checked'])
+    document.getElementById('loader').classList.add('show');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    try {
+        if (action === 'n-gramAnalis') {
+            const all_gram = await storage.get('n-gram');
+            const date_gram = new Object();
+            if (all_gram['process_from'] === 'page') {
+                let text = await getTextFromUrl(tab.url);
+                if (all_gram['lem_gram_set']?.length > 0) text = await lemmatization(text)
+                date_gram[tab.url] = generateNGrams(text, all_gram['n-gram_checked']);
             }
-            else {
-                for (const el of domain) {
+            else if (all_gram['process_from'] === 'pages_buffer') {
+                let domain = null; let finalDate = null;
+                domain = await navigator.clipboard.readText(); domain = domain.split('\n');
+
+                let alltext = [];
+                if (all_gram['gram_union']) {
+                    for (const el of domain) {
+                        try {
+                            new URL(el);
+                            const text = await getTextFromUrl(el)
+                            alltext.push(...text);
+                        } catch (e) { }
+                    }
+                    if (all_gram['lem_gram_set']?.length > 0) alltext = await lemmatization(alltext);
+                    date_gram['all site'] = generateNGrams(alltext, all_gram['n-gram_checked'])
+                }
+                else {
+                    for (const el of domain) {
+                        try {
+                            new URL(el);
+                            let text = await getTextFromUrl(el);
+                            if (all_gram['lem_gram_set']?.length > 0) text = await lemmatization(text);
+                            date_gram[el] = generateNGrams(text, all_gram['n-gram_checked'])
+                        } catch (e) { }
+                    }
+                }
+            }
+            else if (all_gram['process_from'] === 'buffer') {
+                let blocksWords = [];
+                date_gram['key'] = {}
+
+                let copyText = await navigator.clipboard.readText(); copyText = copyText.split('\n')
+                copyText.forEach(el => blocksWords.push(el.split(' ')));
+                if (all_gram['lem_gram_set']?.length > 0) blocksWords = await lemmatization(blocksWords);
+                date_gram['key'] = generateNGrams(blocksWords, all_gram['n-gram_checked'])
+            }
+            async function getTextFromUrl(url) {
+                let html = await new Promise((resolve, reject) => {
+                    chrome.runtime.sendMessage({ action: 'fetchHtml', url },
+                        (response) => {
+                            if (response?.success) resolve(response.html); else reject(response?.error || 'fetch error');
+                        }
+                    );
+                });
+
+                html = html
+                    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+                    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
+                    .replace(/<!--[\s\S]*?-->/g, '');
+
+                let segmentedText = html.replace(/<\/([^>]+)>/g, '|').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ');
+                const blocks = segmentedText.split('|');
+                const blocksWords = [];
+
+                blocks.forEach(block => {
+                    let cleanBlock = block.replace(/[^\w\sа-яА-ЯёЁ]/gi, ' ').replace(/\s+/g, ' ').toLowerCase().trim();
+                    const words = cleanBlock.split(' ').filter(w => w.length >= 1);
+                    if (words.length > 0) blocksWords.push(words);
+                });
+                return blocksWords;
+            }
+            function generateNGrams(blocksWords, nList = [1, 2]) {
+                const result = {};
+                nList.forEach(nRaw => {
+                    const n = Number(nRaw);
+                    const grams = {};
+                    blocksWords.forEach(words => {
+                        for (let i = 0; i <= words.length - n; i++) {
+                            const gram = words.slice(i, i + n).join(' ');
+                            if (!grams[gram]) grams[gram] = 0;
+                            grams[gram]++;
+                        }
+                    });
+                    result[`${n}-gram`] = grams;
+                });
+                return result;
+            }
+
+            if (all_gram['type_of_unloading'].includes('columns')) {
+                const rows = [];
+                if (all_gram['using_headings']) {
+                    const headers = [];
+                    if (all_gram['sel_col_gram'].includes('gram.col.domain')) headers.push('domain');
+                    if (all_gram['sel_col_gram'].includes('gram.col.gram')) headers.push('n-gram');
+                    headers.push('words');
+                    if (all_gram['sel_col_gram'].includes('gram.col.numberOfRepetitions')) headers.push('repeat');
+                    rows.push(headers);
+                }
+
+                for (const [domain, gramsByN] of Object.entries(date_gram)) {
+                    for (const [nGram, words] of Object.entries(gramsByN)) {
+                        for (const [word, count] of Object.entries(words)) {
+                            const row = [];
+                            if (all_gram['sel_col_gram'].includes('gram.col.domain')) row.push(domain);
+                            if (all_gram['sel_col_gram'].includes('gram.col.gram')) row.push(nGram);
+                            row.push(word);
+                            if (all_gram['sel_col_gram'].includes('gram.col.numberOfRepetitions')) row.push(count);
+                            rows.push(row);
+                        }
+                    }
+                }
+
+                const tsv = rows.map(row => row.join('\t')).join('\n');
+                await navigator.clipboard.writeText(tsv);
+            } else {
+                const rows = [];
+                const showDomain = all_gram['sel_col_gram']?.includes('gram.col.domain') ?? false;
+                if (all_gram['using_headings']) {
+                    const headers = [];
+                    if (showDomain) headers.push('domain');
+                    all_gram['n-gram_checked'].map(n => `${n}-gram`).forEach(col => headers.push(col));
+                    rows.push(headers);
+                }
+
+                for (const [domain, gramsByN] of Object.entries(date_gram)) {
+                    const row = [];
+                    if (showDomain) row.push(domain);
+                    all_gram['n-gram_checked'].forEach(n => {
+                        const gramKey = `${n}-gram`;
+                        if (gramsByN[gramKey]) {
+                            const grams = Object.keys(gramsByN[gramKey]); row.push(grams.join(', '));
+                        } else { row.push(''); }
+                    });
+                    rows.push(row);
+                }
+                const tsv = rows.map(row => row.join('\t')).join('\n');
+                await navigator.clipboard.writeText(tsv);
+            }
+            showBtnToast(action, 'n-gram copy', 'success');
+            return
+        }
+        if (action === 'copiedLinks') {
+            const activType = await window.modules.storage.get('kw_and_urls', 'type') ?? 'url';
+            if (activType === 'url') {
+                const text = await navigator.clipboard.readText();
+                if (!text) { showBtnToast(action, 'not date', 'error'); return }
+                const urls = text.split('\n').map(s => s.trim()).filter(s => {
                     try {
-                        new URL(el); 
-                        const text = await getTextFromUrl(el);
-                        date_gram[el] = generateNGrams(text, all_gram['n-gram_checked'])
-                    } catch (e) { }
-                }
-            }
-        }
-        else if (all_gram['process_from'] === 'buffer') {
-            const blocksWords = [];
-            date_gram['key'] = {}
-
-            let copyText = await navigator.clipboard.readText(); copyText = copyText.split('\n')
-            copyText.forEach(el => blocksWords.push(el.split(' ')) );
-            date_gram['key'] = generateNGrams(blocksWords, all_gram['n-gram_checked'])
-        }
-        async function getTextFromUrl(url) {
-            let html = await new Promise((resolve, reject) => {
-                chrome.runtime.sendMessage({ action: 'fetchHtml', url },
-                    (response) => {
-                        if (response?.success) resolve(response.html); else reject(response?.error || 'fetch error');
-                    }
-                );
-            });
-
-            html = html
-                .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-                .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
-                .replace(/<!--[\s\S]*?-->/g, '');
-            
-            let segmentedText = html.replace(/<\/([^>]+)>/g, '|').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ');
-            const blocks = segmentedText.split('|');
-            const blocksWords = [];
-
-            blocks.forEach(block => {
-                let cleanBlock = block.replace(/[^\w\sа-яА-ЯёЁ]/gi, ' ').replace(/\s+/g, ' ').toLowerCase().trim();
-                const words = cleanBlock.split(' ').filter(w => w.length >= 1);
-                if (words.length > 0) blocksWords.push(words);
-            });
-            return blocksWords;
-        }
-        function generateNGrams(blocksWords, nList = [1, 2]) {
-            const result = {};
-            nList.forEach(nRaw => {
-                const n = Number(nRaw);
-                const grams = {};
-                blocksWords.forEach(words => {
-                    for (let i = 0; i <= words.length - n; i++) {
-                        const gram = words.slice(i, i + n).join(' '); 
-                        if (!grams[gram]) grams[gram] = 0;  
-                        grams[gram]++;
-                    }
+                        const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:';
+                    } catch { return false; }
                 });
-                result[`${n}-gram`] = grams;
-            });
-            return result;
-        }
-
-        if (all_gram['type_of_unloading'].includes('columns')) {
-            const rows = [];
-            if (all_gram['using_headings']) {
-                const headers = [];
-                if (all_gram['sel_col_gram'].includes('gram.col.domain')) headers.push('domain');
-                if (all_gram['sel_col_gram'].includes('gram.col.gram')) headers.push('n-gram');
-                headers.push('words');
-                if (all_gram['sel_col_gram'].includes('gram.col.numberOfRepetitions')) headers.push('repeat');
-                rows.push(headers);
-            }
-
-            for (const [domain, gramsByN] of Object.entries(date_gram)) {
-                for (const [nGram, words] of Object.entries(gramsByN)) {
-                    for (const [word, count] of Object.entries(words)) {
-                        const row = [];
-                        if (all_gram['sel_col_gram'].includes('gram.col.domain')) row.push(domain);
-                        if (all_gram['sel_col_gram'].includes('gram.col.gram')) row.push(nGram);
-                        row.push(word);
-                        if (all_gram['sel_col_gram'].includes('gram.col.numberOfRepetitions')) row.push(count);
-                        rows.push(row);
-                    }
+                if (urls.length === 0) { showBtnToast(action, 'not urls', 'error'); return }
+                const tabIds = [];
+                for (const url of urls) {
+                    await new Promise(res => setTimeout(res, 120));
+                    const tab = await chrome.tabs.create({ url, active: false });
+                    tabIds.push(tab.id);
                 }
+                await chrome.tabs.group({ tabIds });
             }
-
-            const tsv = rows.map(row => row.join('\t')).join('\n');
-            await navigator.clipboard.writeText(tsv);
-        } else {
-            const rows = [];
-            const showDomain = all_gram['sel_col_gram']?.includes('gram.col.domain') ?? false;
-            if (all_gram['using_headings']) {
-                const headers = [];
-                if (showDomain) headers.push('domain');
-                all_gram['n-gram_checked'].map(n => `${n}-gram`).forEach(col => headers.push(col));
-                rows.push(headers);
-            }
-
-            for (const [domain, gramsByN] of Object.entries(date_gram)) {
-                const row = [];
-                if (showDomain) row.push(domain);
-                all_gram['n-gram_checked'].forEach(n => {
-                    const gramKey = `${n}-gram`;
-                    if (gramsByN[gramKey]) { const grams = Object.keys(gramsByN[gramKey]); row.push(grams.join(', '));
-                    } else { row.push(''); }
-                });
-                rows.push(row);
-            }
-            const tsv = rows.map(row => row.join('\t')).join('\n');
-            await navigator.clipboard.writeText(tsv);
-        }
-
-        showBtnToast(action, 'n-gram copy', 'success');
-    }
-    if (action === 'copiedLinks') {
-        const activType = await window.modules.storage.get('kw_and_urls', 'type') ?? 'url';
-        if (activType === 'url') {
-            const text = await navigator.clipboard.readText();
-            if (!text) { showBtnToast(action, 'not date', 'error'); return }
-            const urls = text.split('\n').map(s => s.trim()).filter(s => {
-                try {
-                    const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:';
-                } catch { return false; }
-            });
-            if (urls.length === 0) { showBtnToast(action, 'not urls', 'error'); return }
-            const tabIds = [];
-            for (const url of urls) {
-                await new Promise(res => setTimeout(res, 120));
-                const tab = await chrome.tabs.create({ url, active: false });
-                tabIds.push(tab.id);
-            }
-            await chrome.tabs.group({ tabIds });
-        }
-        if (activType === 'kw') {
-            const text = await navigator.clipboard.readText();
-            if (!text) { showBtnToast(action, 'no data', 'error'); return }
-            const keywords = text.split('\n').map(s => s.trim()).filter(Boolean);
-            if (keywords.length === 0) {showBtnToast(action, 'no keywords', 'error'); return;}
-            const tabIds = [];
-            for (const kw of keywords) {
-                await new Promise(res => setTimeout(res, 120));
-                const url = `https://www.google.com/search?q=${encodeURIComponent(kw)}`;
-                const tab = await chrome.tabs.create({ url, active: false });
-                tabIds.push(tab.id);
-            }
-            await chrome.tabs.group({ tabIds });
-        }
-    }
-    if (action === 'kwMatchType') {
-        let text = await navigator.clipboard.readText();
-
-        if (!text) { showBtnToast(action, 'no data', 'error'); return; }
-        const match_type = await window.modules.storage.get('kw_match_type', 'match_type') ?? 'broad';
-        const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
-        const cleaned = lines.map(cleanKeyword);
-        const result = cleaned.map(k => applyMatchType(k, match_type)).join('\n');
-        
-        await navigator.clipboard.writeText(result);
-        showBtnToast(action, `converted to ${match_type} keywords`, 'success');
-
-        function cleanKeyword(str) { return str.replace(/^\[|\]$/g, '').replace(/^"|"$/g, '').trim(); }
-        function applyMatchType(keyword, type) {
-            if (!keyword) return '';
-            switch (type) {
-                case 'phrase': return `\"${keyword}\"`;
-                case 'exact': return `[${keyword}]`;
-                default: return keyword;
-            }
-        }
-    }
-    if (action === 'parserWebSite') {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.url?.includes("google.")) {showBtnToast(action, 'open Google search', 'error');return; }
-        const fields = await storage.get('parse_search_result', 'snippet_fields') || [];
-        if (!fields.length) { showBtnToast(action, 'select fields', 'error'); return;}
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id }, function: scrapeGoogleSerp, args: [fields]
-        });
-        const text = results?.[0]?.result; if (!text) {showBtnToast(action, 'no data', 'error');return;}
-
-        await navigator.clipboard.writeText(text);
-        showBtnToast(action, 'copy completed', 'success');
-
-        async function scrapeGoogleSerp(fields) {
-            const query = document.querySelector('textarea[name="q"], input[name="q"]')?.value || "—";
-            const allLinks = Array.from(document.querySelectorAll('a h3'));
-            const data = [];
-            let count = 0;
-
-            const sumPos = await window.modules.storage.get('parse_search_result', 'number_of_sites')
-            for (const titleEl of allLinks) {
-                if (count >= sumPos) break;
-                const linkEl = titleEl.closest('a'); if (!linkEl) continue; const url = linkEl.href;
-                if (!url.startsWith('http') || url.includes('google.com/search')) continue;
-                const title = titleEl.innerText.replace(/\s+/g, ' ').trim();
-                let domain = "";
-                try { domain = new URL(url).hostname; } catch { domain = url; }
-
-                const parent = titleEl.closest('div.g') || titleEl.parentElement.parentElement;
-
-                const snippetEl = parent?.querySelector('.VwiC3b, .yXK7lf');
-                const snippet = snippetEl ? snippetEl.innerText.replace(/\s+/g, ' ').trim() : "—";
-
-                const row = [];
-
-                if (fields.includes('query')) row.push(query);
-                if (fields.includes('domain')) row.push(domain);
-                if (fields.includes('url')) row.push(url);
-                if (fields.includes('title')) row.push(title);
-                if (fields.includes('snippet')) row.push(snippet);
-                if (row.length) { data.push(row.join('\t')); count++; }
-            }
-
-            return data.join('\n');
-        }
-    }
-    if (action === 'grabBtn') {
-        const MY_ORDER = [
-            "ICNT-M-S-mkgagency", "WGC-M-S-resurscontrol", "BY_AKTVST_BLL", "WGC-M-S-zee", "WGC-M-S-supersto", "--", "ICNT-M-S-ventprof"
-        ];
-
-        chrome.scripting.executeScript({
-            target: { tabId: tab.id }, function: grabAndSortBudgets, args: [MY_ORDER]
-        }, (results) => {
-            if (chrome.runtime.lastError || !results || !results[0]) { 
-                openRequiredTabs(); showBtnToast(action, 'pages open', 'success'); return; }
-
-            const result = results[0].result;
-
-            if (result !== 'no') {
-                navigator.clipboard.writeText(result).then(() => { showBtnToast(action, 'copy completed', 'success'); });
-            } else { openRequiredTabs(); showBtnToast(action, 'pages open', 'success'); }
-        });
-
-        async function openRequiredTabs() {
-            const tabIds = [];
-            const urls = [
-                "https://ads.google.com/aw/budgets?ocid=7438238352&workspaceId=0&ascid=7438238352&euid=1351146416&__u=4572187184&uscid=7438238352&__c=8585720848&authuser=0&sf=manager&subid=by-ru-awhp-g-aw-c-t-man-signin%21o2",
-                "https://direct.yandex.by/dna/grid/campaigns/?ulogin=porg-ufvi6c33&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&stat-preset=last30Days&sort-key=STAT_CTR&sort-direction=asc",
-                "https://direct.yandex.by/dna/grid/campaigns/?ulogin=AKTVST&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&stat-preset=last30Days&sort-key=STAT_CTR&sort-direction=asc",
-                "https://direct.yandex.by/dna/grid/campaigns/?ulogin=zeekrminsk-2024&stat-preset=last30Days&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&sort-key=STAT_CTR&sort-direction=asc",
-                "https://direct.yandex.by/dna/grid/campaigns/?ulogin=supersto-2025&stat-preset=last30Days&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&sort-key=start_date&sort-direction=asc"
-            ]
-            for (const url of urls) {
-                const tab = await chrome.tabs.create({ url, active: false }); tabIds.push(tab.id);
-            }
-            if (tabIds.length) {await chrome.tabs.group({ tabIds });}
-        }
-
-        function grabAndSortBudgets(orderedList) {
-            if (!window.location.href.includes("ads.google.com/aw/budgets")) return "no";
-
-            const accountMap = {};
-            const rows = document.querySelectorAll('.particle-table-row');
-
-            rows.forEach(row => {
-                const nameCell = row.querySelector('ess-cell[essfield="customer_info.descriptive_name"]');
-                const budgetCell = row.querySelector('ess-cell[essfield="customer_budget.remaining_account_budget"]');
-
-                if (nameCell && budgetCell) {
-                    const nameEl = nameCell.querySelector('.descriptive-name') || nameCell.querySelector('a');
-                    const name = nameEl ? nameEl.innerText.trim() : nameCell.innerText.trim();
-
-                    let budgetRaw = budgetCell.innerText.trim();
-                    let budgetClean = budgetRaw.replace(/[^\d.,]/g, '').replace(/\s/g, '');
-
-                    if (/\d/.test(budgetClean)) accountMap[name] = budgetClean;
+            if (activType === 'kw') {
+                const text = await navigator.clipboard.readText();
+                if (!text) { showBtnToast(action, 'no data', 'error'); return }
+                const keywords = text.split('\n').map(s => s.trim()).filter(Boolean);
+                if (keywords.length === 0) { showBtnToast(action, 'no keywords', 'error'); return; }
+                const tabIds = [];
+                for (const kw of keywords) {
+                    await new Promise(res => setTimeout(res, 120));
+                    const url = `https://www.google.com/search?q=${encodeURIComponent(kw)}`;
+                    const tab = await chrome.tabs.create({ url, active: false });
+                    tabIds.push(tab.id);
                 }
-            });
-
-            return orderedList.map(targetName => {
-                if (targetName === "--") return "-";
-                const foundKey = Object.keys(accountMap).find(key =>
-                    key.toLowerCase().includes(targetName.toLowerCase().trim())
-                );
-                return foundKey ? accountMap[foundKey] : "-";
-            }).join('\n');
-        }
-    }
-    if (action === 'calcBtn') {
-        const currentUrl = tab.url || '';
-        if (!currentUrl.includes('ads.google.com')) { showBtnToast(action, 'wrong page', 'error'); return; }
-
-        const saved = await storage.get('calcBtn', 'range') || '1';
-        chrome.tabs.sendMessage(tab.id, { action: 'calc', range: saved }, (value) => {
-            if (!value) {showBtnToast(action, 'no elements', 'error'); return; }
-            if (value === 'one_day') {showBtnToast(action, 'one day is indicated', 'error'); return; }
-            if (value === 'no_range') { showBtnToast(action, 'no calculated range', 'error'); return; }
-            if (value === 'no_elements') { showBtnToast(action, 'no data', 'error'); return; }
-            
-            const resultEl = document.getElementById('result');
-            resultEl.style.display = 'block'; 
-            resultEl.innerHTML = value;
-
-            document.querySelector('.containerBtn').style.display = 'none';
-            document.querySelector('#param').style.display = 'none';
-            document.querySelector('#param-btn').style.display = 'none';
-
-
-
-            
-            const table = resultEl.querySelector('.result-table');
-            if (table) {
-                const tableWidth = table.scrollWidth + 32;
-                const newWidth = Math.min(tableWidth, 800);
-                document.body.style.width = newWidth + 'px';
+                await chrome.tabs.group({ tabIds });
             }
-            showBtnToast(action, "table open", 'success');
-        });
-    }
-    if (action === 'copyBtn') {
-        const currentUrl = tab.url || '';
-        if (!currentUrl.includes('ads.google.com')) { showBtnToast(action, 'wrong page', 'error'); return; }
-        chrome.tabs.sendMessage(tab.id, { action: 'copyWithScroll' }, async (result) => {
-            if (!result || result === 'no_data') { showBtnToast(action, 'no elements', 'error'); return;}
+            return
+        }
+        if (action === 'kwMatchType') {
+            let text = await navigator.clipboard.readText();
+
+            if (!text) { showBtnToast(action, 'no data', 'error'); return; }
+            const match_type = await window.modules.storage.get('kw_match_type', 'match_type') ?? 'broad';
+            const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+            const cleaned = lines.map(cleanKeyword);
+            const result = cleaned.map(k => applyMatchType(k, match_type)).join('\n');
+
             await navigator.clipboard.writeText(result);
-            showBtnToast(action, 'copy completed', 'success');
-        });
-    }
-    if (action === 'minusWrdBtn') {
-        const currentUrl = tab.url || '';
-        if (!currentUrl.includes('ads.google.com')) { showBtnToast(action, 'wrong page', 'error'); return; }
-        chrome.tabs.sendMessage(tab.id, { action: 'minusWords' }, (result) => {
-            if (result === 'done') { showBtnToast(action, "table open", 'success');
-            } else { showBtnToast(action, result, 'error'); }
-        });
-    }
-    if (action === 'calcBtnResult') {
-        const table = document.querySelector('#result .result-table')
-        let result = [];
-        
-        for (let row of table.rows) {
-            let rowData = [];
-            for (let cell of row.cells) { rowData.push(cell.innerText.trim()); }
-            result.push(rowData.join('\t'));
+            showBtnToast(action, `converted to ${match_type} keywords`, 'success');
+
+            function cleanKeyword(str) { return str.replace(/^\[|\]$/g, '').replace(/^"|"$/g, '').trim(); }
+            function applyMatchType(keyword, type) {
+                if (!keyword) return '';
+                switch (type) {
+                    case 'phrase': return `\"${keyword}\"`;
+                    case 'exact': return `[${keyword}]`;
+                    default: return keyword;
+                }
+            }
+            return
         }
-        const text = result.join('\n');
-        await navigator.clipboard.writeText(text);
-        btn.style.background = '#daeedf';
-        btn._timer = setTimeout(() => { btn.style.removeProperty('background'); }, 1000);
-    }
+        if (action === 'parserWebSite') {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.url?.includes("google.")) { showBtnToast(action, 'open Google search', 'error'); return; }
+            const fields = await storage.get('parse_search_result', 'snippet_fields') || [];
+            if (!fields.length) { showBtnToast(action, 'select fields', 'error'); return; }
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id }, function: scrapeGoogleSerp, args: [fields]
+            });
+            const text = results?.[0]?.result; if (!text) { showBtnToast(action, 'no data', 'error'); return; }
+
+            await navigator.clipboard.writeText(text);
+            showBtnToast(action, 'copy completed', 'success');
+
+            async function scrapeGoogleSerp(fields) {
+                const query = document.querySelector('textarea[name="q"], input[name="q"]')?.value || "—";
+                const allLinks = Array.from(document.querySelectorAll('a h3'));
+                const data = [];
+                let count = 0;
+
+                const sumPos = await window.modules.storage.get('parse_search_result', 'number_of_sites')
+                for (const titleEl of allLinks) {
+                    if (count >= sumPos) break;
+                    const linkEl = titleEl.closest('a'); if (!linkEl) continue; const url = linkEl.href;
+                    if (!url.startsWith('http') || url.includes('google.com/search')) continue;
+                    const title = titleEl.innerText.replace(/\s+/g, ' ').trim();
+                    let domain = "";
+                    try { domain = new URL(url).hostname; } catch { domain = url; }
+
+                    const parent = titleEl.closest('div.g') || titleEl.parentElement.parentElement;
+
+                    const snippetEl = parent?.querySelector('.VwiC3b, .yXK7lf');
+                    const snippet = snippetEl ? snippetEl.innerText.replace(/\s+/g, ' ').trim() : "—";
+
+                    const row = [];
+
+                    if (fields.includes('query')) row.push(query);
+                    if (fields.includes('domain')) row.push(domain);
+                    if (fields.includes('url')) row.push(url);
+                    if (fields.includes('title')) row.push(title);
+                    if (fields.includes('snippet')) row.push(snippet);
+                    if (row.length) { data.push(row.join('\t')); count++; }
+                }
+
+                return data.join('\n');
+            }
+            return
+        }
+        if (action === 'grabBtn') {
+            const MY_ORDER = [
+                "ICNT-M-S-mkgagency", "WGC-M-S-resurscontrol", "BY_AKTVST_BLL", "WGC-M-S-zee", "WGC-M-S-supersto", "--", "ICNT-M-S-ventprof"
+            ];
+
+            chrome.scripting.executeScript({
+                target: { tabId: tab.id }, function: grabAndSortBudgets, args: [MY_ORDER]
+            }, (results) => {
+                if (chrome.runtime.lastError || !results || !results[0]) {
+                    openRequiredTabs(); showBtnToast(action, 'pages open', 'success'); return;
+                }
+
+                const result = results[0].result;
+
+                if (result !== 'no') {
+                    navigator.clipboard.writeText(result).then(() => { showBtnToast(action, 'copy completed', 'success'); });
+                } else { openRequiredTabs(); showBtnToast(action, 'pages open', 'success'); }
+            });
+
+            async function openRequiredTabs() {
+                const tabIds = [];
+                const urls = [
+                    "https://ads.google.com/aw/budgets?ocid=7438238352&workspaceId=0&ascid=7438238352&euid=1351146416&__u=4572187184&uscid=7438238352&__c=8585720848&authuser=0&sf=manager&subid=by-ru-awhp-g-aw-c-t-man-signin%21o2",
+                    "https://direct.yandex.by/dna/grid/campaigns/?ulogin=porg-ufvi6c33&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&stat-preset=last30Days&sort-key=STAT_CTR&sort-direction=asc",
+                    "https://direct.yandex.by/dna/grid/campaigns/?ulogin=AKTVST&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&stat-preset=last30Days&sort-key=STAT_CTR&sort-direction=asc",
+                    "https://direct.yandex.by/dna/grid/campaigns/?ulogin=zeekrminsk-2024&stat-preset=last30Days&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&sort-key=STAT_CTR&sort-direction=asc",
+                    "https://direct.yandex.by/dna/grid/campaigns/?ulogin=supersto-2025&stat-preset=last30Days&dim-filter=CPC_AND_CPM&status-filter=ALL_EXCEPT_ARCHIVED&sort-key=start_date&sort-direction=asc"
+                ]
+                for (const url of urls) {
+                    const tab = await chrome.tabs.create({ url, active: false }); tabIds.push(tab.id);
+                }
+                if (tabIds.length) { await chrome.tabs.group({ tabIds }); }
+            }
+
+            function grabAndSortBudgets(orderedList) {
+                if (!window.location.href.includes("ads.google.com/aw/budgets")) return "no";
+
+                const accountMap = {};
+                const rows = document.querySelectorAll('.particle-table-row');
+
+                rows.forEach(row => {
+                    const nameCell = row.querySelector('ess-cell[essfield="customer_info.descriptive_name"]');
+                    const budgetCell = row.querySelector('ess-cell[essfield="customer_budget.remaining_account_budget"]');
+
+                    if (nameCell && budgetCell) {
+                        const nameEl = nameCell.querySelector('.descriptive-name') || nameCell.querySelector('a');
+                        const name = nameEl ? nameEl.innerText.trim() : nameCell.innerText.trim();
+
+                        let budgetRaw = budgetCell.innerText.trim();
+                        let budgetClean = budgetRaw.replace(/[^\d.,]/g, '').replace(/\s/g, '');
+
+                        if (/\d/.test(budgetClean)) accountMap[name] = budgetClean;
+                    }
+                });
+
+                return orderedList.map(targetName => {
+                    if (targetName === "--") return "-";
+                    const foundKey = Object.keys(accountMap).find(key =>
+                        key.toLowerCase().includes(targetName.toLowerCase().trim())
+                    );
+                    return foundKey ? accountMap[foundKey] : "-";
+                }).join('\n');
+            }
+            return
+        }
+        if (action === 'calcBtn') {
+            const currentUrl = tab.url || '';
+            if (!currentUrl.includes('ads.google.com')) { showBtnToast(action, 'wrong page', 'error'); return; }
+
+            const saved = await storage.get('calcBtn', 'range') || '1';
+            chrome.tabs.sendMessage(tab.id, { action: 'calc', range: saved }, (value) => {
+                if (!value) { showBtnToast(action, 'no elements', 'error'); return; }
+                if (value === 'one_day') { showBtnToast(action, 'one day is indicated', 'error'); return; }
+                if (value === 'no_range') { showBtnToast(action, 'no calculated range', 'error'); return; }
+                if (value === 'no_elements') { showBtnToast(action, 'no data', 'error'); return; }
+
+                const resultEl = document.getElementById('result');
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = value;
+
+                document.querySelector('.containerBtn').style.display = 'none';
+                document.querySelector('#param').style.display = 'none';
+                document.querySelector('#param-btn').style.display = 'none';
+
+
+
+
+                const table = resultEl.querySelector('.result-table');
+                if (table) {
+                    const tableWidth = table.scrollWidth + 32;
+                    const newWidth = Math.min(tableWidth, 800);
+                    document.body.style.width = newWidth + 'px';
+                }
+                showBtnToast(action, "table open", 'success');
+            });
+            return
+        }
+        if (action === 'copyBtn') {
+            const currentUrl = tab.url || '';
+            if (!currentUrl.includes('ads.google.com')) { showBtnToast(action, 'wrong page', 'error'); return; }
+            chrome.tabs.sendMessage(tab.id, { action: 'copyWithScroll' }, async (result) => {
+                if (!result || result === 'no_data') { showBtnToast(action, 'no elements', 'error'); return; }
+                await navigator.clipboard.writeText(result);
+                showBtnToast(action, 'copy completed', 'success');
+            });
+            return
+        }
+        if (action === 'minusWrdBtn') {
+            const currentUrl = tab.url || '';
+            if (!currentUrl.includes('ads.google.com')) { showBtnToast(action, 'wrong page', 'error'); return; }
+            chrome.tabs.sendMessage(tab.id, { action: 'minusWords' }, (result) => {
+                if (result === 'done') {
+                    showBtnToast(action, "table open", 'success');
+                } else { showBtnToast(action, result, 'error'); }
+            });
+            return
+        }
+        if (action === 'calcBtnResult') {
+            const table = document.querySelector('#result .result-table')
+            let result = [];
+
+            for (let row of table.rows) {
+                let rowData = [];
+                for (let cell of row.cells) { rowData.push(cell.innerText.trim()); }
+                result.push(rowData.join('\t'));
+            }
+            const text = result.join('\n');
+            await navigator.clipboard.writeText(text);
+            btn.style.background = '#daeedf';
+            btn._timer = setTimeout(() => { btn.style.removeProperty('background'); }, 1000);
+            return
+        }
+        if (action === 'lemmatization') {
+            let text = await navigator.clipboard.readText();
+            const blockArray = [];
+            text.split(`\n`).forEach(el => blockArray.push(el.split(' ')))
+
+            const finalDate = await lemmatization(blockArray)
+            const resultText = finalDate.map(d => d.join(' ')).join('\n');
+            await navigator.clipboard.writeText(resultText);
+            showBtnToast(action, 'lemmatization was successful', 'success')
+            return
+        }
+    } catch { }
+    finally { document.getElementById('loader').classList.remove('show'); }
 });
 
 
@@ -677,7 +713,6 @@ document.addEventListener('change', async (e) => {
         await modules.storage.set('ui', 'visibleButtons', checked);
         await renderButtons();
     }
-
 
     if (e.target.name === 'columnComma') {
         const value = e.target.value; await storage.set('n-gram', 'type_of_unloading', value);
@@ -748,14 +783,14 @@ async function nGramCheckDisabled(action) {
         if (checked.length === 1) { checked[0].disabled = true;
         } else { allCheckboxes.forEach(el => el.disabled = false);}
     }
-    if (['lemGram', 'all'].includes(action)) {
-        if (document.querySelector('input[name="lemGram"]').checked) {
-            document.querySelector('input[value="lemGramDB"]').disabled = false;
-        }
-        else {
-            document.querySelector('input[value="lemGramDB"]').disabled = true;
-            document.querySelector('input[value="lemGramDB"]').checked = false;
-            await storage.remove('n-gram', 'lem_gram_set')
-        }
-    }
+    // if (['lemGram', 'all'].includes(action)) {
+    //     if (document.querySelector('input[name="lemGram"]').checked) {
+    //         document.querySelector('input[value="lemGramDB"]').disabled = false;
+    //     }
+    //     else {
+    //         document.querySelector('input[value="lemGramDB"]').disabled = true;
+    //         document.querySelector('input[value="lemGramDB"]').checked = false;
+    //         await storage.remove('n-gram', 'lem_gram_set')
+    //     }
+    // }
 }
