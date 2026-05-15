@@ -1,3 +1,5 @@
+.hidden { display: none;}
+
 body {
     margin: 0; padding: 0; overflow: hidden; color: black; width: 300px; font-size: 12px; color: #767c8b;
 }
@@ -21,7 +23,7 @@ h1 { font-size: 14px; font-weight: 500;}
     padding: 15px;
     overflow-y: auto;
     box-sizing: border-box;
-    max-height: 700px;
+    /* max-height: 700px; */
 }
 
 .h2 {margin: 20px 0px 10px 0px; font-size: 16px; font-weight: 500; opacity: 0.6;}
@@ -76,12 +78,25 @@ h1 { font-size: 14px; font-weight: 500;}
 
 
 
-#result {
+.calculateAverage {
     margin-top: 5px; word-break: break-word;
     border: 1px solid #d3d3d3; background-color: #fafafa; height: 200px; overflow: auto;
 }
-[data-id="calcBtnResult"] { cursor: pointer; font-weight: 600;}
-.wrap-calcBtnRange { display: flex; align-items: center; margin-bottom: 10px;}
+[data-id="calcBtnResult"] { cursor: pointer; font-weight: 600; white-space: nowrap;}
+[data-id="calcBtnResult"] .action-btn { padding: 0px;}
+.wrap-calcBtnRange { 
+    display: flex; align-items: center; margin-bottom: 10px; padding: 5px 10px; justify-content: space-between;
+}
+.headAuditPage { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 16px; }
+.auditEl { margin: 7px 0px; font-size: 14px; }
+.H1H6wrap, .imgWrap {
+    padding: 10px;
+    border: 0.3px solid #d9d9d9;
+}
+.elH1H6wrap, .elAllImgWrap { margin-top: 10px;}
+.h1h6head, .imgHead { cursor: pointer; }
+.imgPrev { margin: 5px 0px;}
+
 .info-calcBtn { margin: 0px 16px }
 
 #param { 
@@ -101,7 +116,7 @@ h1 { font-size: 14px; font-weight: 500;}
     cursor: default; display: flex; justify-content: space-between; font-weight: 700; margin-bottom: 20px; 
 }
 
-.close-icon, .close-icon-btn {
+.close-icon, .close-icon-btn, .close-icon-result {
     width: 10px; height: 10px; display: inline-block;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 6L18 18M18 6L6 18'/%3E%3C/svg%3E");
     background-repeat: no-repeat; background-position: center; background-size: contain; cursor: pointer; 
@@ -197,3 +212,12 @@ h1 { font-size: 14px; font-weight: 500;}
         transform: rotate(360deg);
     }
 }
+
+
+
+
+
+
+.auditSummer { display: grid; grid-template-columns: repeat(8, 1fr); margin: 20px 0; }
+.auditSummerH, .auditSummerV { padding: 7px 0px; text-align: center; }
+.auditSummerH { border-bottom: 1px solid #d9d9d9; }

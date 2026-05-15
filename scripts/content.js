@@ -88,7 +88,7 @@ window.calculateConversions = async function (range) {
         let month, year;
 
         if (parts[2]) {
-            month = months[parts[2].slice(0, 3).toLowerCase()];
+            month = months[parts[2].toLowerCase()];
             year = parts[3] ? +parts[3] : new Date().getFullYear();
         } else if (fallbackDate) {
             month = fallbackDate.getMonth();
@@ -151,18 +151,20 @@ window.calculateConversions = async function (range) {
     
 
     return `
-    <div class='wrap-calcBtnRange'>
-        <div class='data-btn' data-id='calcBtnResult'><div class='action-btn'>copy</div></div>
-        <div class='info-calcBtn'>${numDay}-day data broken down into ${calcBtnRange}-day intervals</div>
-    </div>
-    <table class="result-table">
-        <thead>
-            <tr>
-                <th>campaign</th>${activeColumns.map(col => `<th>${columnLabels[col] || col}</th>`).join('')}
-            </tr>
-        </thead>
-        <tbody>${rowsHtml}</tbody>
-    </table>`;
+        <div class='calculateAverage'>
+            <div class='wrap-calcBtnRange'>
+                <div class='data-btn' data-id='calcBtnResult'><div class='action-btn'>copy</div></div>
+                <div class='info-calcBtn'>${numDay} days / ${calcBtnRange}-day bins</div>
+                <span class='close-icon-result'></span>
+            </div>
+            <table class="result-table">
+                <thead>
+                    <tr><th>campaign</th>${activeColumns.map(col => `<th>${columnLabels[col] || col}</th>`).join('')}</tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+        </div>
+    `;
 };
 
 window.minusWordPage = async function () {

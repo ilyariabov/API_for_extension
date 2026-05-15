@@ -7,6 +7,7 @@ const BUTTONS_CONFIG = [
     { id: 'parserWebSite', name: 'parser from search results', setting: true },
     { id: 'n-gramAnalis', name: 'n-gram analis', setting: true },
     { id: 'lemmatization', name: 'lemmatization', setting: false },
+    { id: 'auditPage', name: 'audit page', setting: false },
 
     { id: 'grabBtn', name: 'collect budgets', setting: false },
     { id: 'copyBtn', name: 'copy active columns', setting: false },
@@ -62,6 +63,7 @@ const paramWrap = document.querySelector('#param');
 document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.setting');
     if (btn) {
+        // СДЕЛАТЬ КНОПКУ С БЫСТРЫМ СОЗДАНИЕМ UTM МЕТКИ
         paramWrap.style.display = 'block';
         const wrap = btn.closest('.wrap-btn'); const action = wrap.dataset.id;
         document.querySelectorAll('.wrap-btn').forEach(val => { val.classList.remove('activ-btn') })
@@ -234,7 +236,6 @@ document.addEventListener('click', async (e) => {
         document.querySelector('.activ-btn')?.classList.remove('activ-btn');
         return; 
     }
-
     if (e.target.closest('[data-id="settingBtnHead"]')) {
         document.querySelector('#param-btn').style.display = 'block';
         document.querySelector('#result').style.display = 'none';
@@ -263,7 +264,20 @@ document.addEventListener('click', async (e) => {
         document.querySelector('.containerBtn').style.display = 'block'
         return; 
     }
+    const closeResult = e.target.closest('.close-icon-result')
+    if (closeResult) {
+        document.querySelector('#result').style.display = 'none'
+        document.querySelector('.containerBtn').style.display = 'block';
+        document.body.style.width = '300px';
+        return; 
+    }
 
+    if (e.target.closest('.h1h6head')) {
+        document.querySelector('.elH1H6wrap').classList.toggle('hidden')
+    }
+    if (e.target.closest('.imgHead')) {
+        document.querySelector('.elAllImgWrap').classList.toggle('hidden')
+    }
 });
 
 async function lemmatization(text) {
@@ -341,7 +355,7 @@ document.addEventListener('click', async (e) => {
                         }
                     );
                 });
-
+                
                 html = html
                     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
                     .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
@@ -428,6 +442,160 @@ document.addEventListener('click', async (e) => {
             showBtnToast(action, 'n-gram copy', 'success');
             return
         }
+
+        if (action === 'auditPage') {
+            const url = tab.url;
+            // const url = 'https://mkg.agency/';
+
+            // try {
+                const html = await new Promise((resolve, reject) => {
+                    chrome.runtime.sendMessage(
+                        { action: 'fetchHtml', url }, (response) => {
+                            if (response?.success) { resolve(response.html);
+                            } else { reject(response?.error || 'fetch error');
+                            }
+                        }
+                    );
+                });
+
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+
+                const title = doc.querySelector('title')?.innerText?.trim() || '';
+                const description =doc.querySelector('meta[name="description"]')?.getAttribute('content')?.trim() || '';
+
+                const headingElements = [...doc.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+                const headingsTree = [];
+                const stack = [];
+                headingElements.forEach(el => {
+                    const level = Number(el.tagName[1]);
+                    const node = {tag: el.tagName.toLowerCase(), level, text: el.innerText.trim(), children: []};
+                    while ( stack.length && stack[stack.length - 1].level >= level ) { stack.pop(); }
+                    if (stack.length === 0) headingsTree.push(node);
+                    else stack[stack.length - 1].children.push(node); 
+                    stack.push(node);
+                });
+
+                const allLinks = [...doc.querySelectorAll('a[href]')];
+                const internalLinks = [];
+                const externalLinks = [];
+
+                allLinks.forEach(link => {
+                    const href = link.getAttribute('href');
+                    if (!href) return;
+                    try {
+                        const absoluteUrl = new URL(href, url);
+                        if (absoluteUrl.hostname === new URL(url).hostname) internalLinks.push(absoluteUrl.href);
+                        else externalLinks.push(absoluteUrl.href);
+                    } catch (e) { }
+                });
+
+                const images = [...doc.querySelectorAll('img')].map(img => ({
+                    src: img.getAttribute('src') || '',
+                    alt: img.getAttribute('alt') || '',
+                    hasAlt: !!img.getAttribute('alt')
+                }));
+
+                const bodyText = doc.body?.innerText?.replace(/\s+/g, ' ')?.trim() || '';
+                const wordCount = bodyText.length > 0 ? bodyText.split(' ').length : 0;
+
+                const imagesWithoutAlt = images.filter(img => !img.hasAlt).length;
+
+                const auditData = {
+                    url, title, description, headingsTree,
+                    links: {
+                        total: allLinks.length, 
+                        internal: internalLinks.length, 
+                        external: externalLinks.length, 
+                        internalLinks, externalLinks
+                    },
+
+                    images: { total: images.length, withoutAlt: imagesWithoutAlt, items: images },
+                    wordCount
+                };
+                console.log(auditData);
+                
+                function renderHeadings(headings, level = 0) {
+                    let html = '';
+                    headings.forEach(item => {
+                        html += `
+                            <div style="padding-left:${level * 25}px; margin: 5px 0px">
+                                <b>&lt;${item.tag.toUpperCase()}&gt;</b><span>${item.text}</span>
+                            </div>
+                        `;
+                        if (item.children?.length) html += renderHeadings(item.children, level + 1);
+                    });
+                    return html;
+                }
+
+
+                // ПРОДОЛЖИТЬ ДЕЛАТЬ ТУТ. СРАЗУ АНАЛОГИЧНО ДЕЛАТЬ ПРОСТО ССЫЛКИ
+                function rendedImgs() {
+                    let html = ``
+                    for (const el of auditData['images']['items']) {
+                        html += `<div class='imgPrev'><a href='${el['src']}'>${el['src']}</a></div>`
+                        // console.log(`el. src: ${el['src']} || alt: ${el['alt']}`);
+                    }
+                    return html
+                }
+                // rendedImgs()
+
+                const resultEl = document.getElementById('result');
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = `
+                    <div class='headAuditPage'>
+                        <span>audit page</span>
+                        <span class='close-icon-result'></span>
+                    </div>
+                    <div class='auditPageWrap'>
+                        <div class='auditEl'><b>url</b> ${auditData['url']}</div>
+                        <div class='auditEl'><b>title</b> ${auditData['title']}</div>
+                        <div class='auditEl'><b>description</b> ${auditData['description']}</div>
+                        <div class='auditEl'><b>word count</b> ${auditData['wordCount']}</div>
+
+                        <div class='auditEl auditSummer'>
+                            <div class='auditSummerH'>h1</div>
+                            <div class='auditSummerH'>h2</div>
+                            <div class='auditSummerH'>h3</div>
+                            <div class='auditSummerH'>h4</div>
+                            <div class='auditSummerH'>h5</div>
+                            <div class='auditSummerH'>h6</div>
+                            <div class='auditSummerH'>imgs</div>
+                            <div class='auditSummerH'>links</div>
+                            
+                            <div class='auditSummerV'>${doc.querySelectorAll('h1').length}</div>
+                            <div class='auditSummerV'>${doc.querySelectorAll('h2').length}</div>
+                            <div class='auditSummerV'>${doc.querySelectorAll('h3').length}</div>
+                            <div class='auditSummerV'>${doc.querySelectorAll('h4').length}</div>
+                            <div class='auditSummerV'>${doc.querySelectorAll('h5').length}</div>
+                            <div class='auditSummerV'>${doc.querySelectorAll('h6').length}</div>
+                            <div class='auditSummerV'>${auditData.images.total}</div>
+                            <div class='auditSummerV'>${auditData.links.total}</div>
+                        </div>
+
+                        <div class='auditEl H1H6wrap'>
+                            <b class='h1h6head'>headings</b>
+                            <div class='elH1H6wrap hidden'>${renderHeadings(auditData.headingsTree)}</div>
+                        </div>
+                        <div class='auditEl imgWrap'>
+                            <b class='imgHead'>images</b>
+                            <div class='elAllImgWrap hidden'>${rendedImgs()}</div>
+                        </div>
+                    </div>
+                `;;
+
+                document.querySelector('.containerBtn').style.display = 'none';
+                document.querySelector('#param').style.display = 'none';
+                document.querySelector('#param-btn').style.display = 'none';
+
+                document.body.style.width = '600px';
+                showBtnToast(action, "audit close", 'success');
+
+            // } catch (error) {
+            //     console.error(error);
+            // }
+        }
+
         if (action === 'copiedLinks') {
             const activType = await window.modules.storage.get('kw_and_urls', 'type') ?? 'url';
             if (activType === 'url') {
@@ -783,14 +951,4 @@ async function nGramCheckDisabled(action) {
         if (checked.length === 1) { checked[0].disabled = true;
         } else { allCheckboxes.forEach(el => el.disabled = false);}
     }
-    // if (['lemGram', 'all'].includes(action)) {
-    //     if (document.querySelector('input[name="lemGram"]').checked) {
-    //         document.querySelector('input[value="lemGramDB"]').disabled = false;
-    //     }
-    //     else {
-    //         document.querySelector('input[value="lemGramDB"]').disabled = true;
-    //         document.querySelector('input[value="lemGramDB"]').checked = false;
-    //         await storage.remove('n-gram', 'lem_gram_set')
-    //     }
-    // }
 }
